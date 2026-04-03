@@ -6,7 +6,9 @@
  *
  * Description:
  * Reads three ultrasonic distance sensors via UART and displays
- * the measured distances on the LCD.
+ * the measured distances on the LCD. If any sensor detects an object within a specified range
+ * for a certain duration, it triggers a Raspberry Pi via a GPIO pin. The system then waits for
+ * a "done" signal from the Pi before allowing new detections.
  *
  * Hardware Pin Assignments:
  *   PA2  - USART2_TX  (Sensor 1), AF7
@@ -18,7 +20,7 @@
  *   PB1  - Pi trigger output (HIGH = trigger Pi)
  *   PA4  - Pi done input (HIGH = Pi finished)
  *
- * All three UARTs: 115200 baud, 8N1, no flow control
+ * All three UARTs: 115200 baud
  */
 
 #include "stm32u5xx.h"
@@ -32,21 +34,21 @@ typedef enum {
     STATE_PROCESSING  // Waiting for Pi to finish (Debouncing)
 } SystemState_t;
 
-/* ---- Global variables ---- */
+// global variables
 uint8_t trigger_cmd = 0x55;  // command byte to trigger ultrasonic sensor reading
-int distances[3] = {0, 0, 0}; // measured distances for 3 sensors (in mm)
+int distances[3] = {0, 0, 0}; // i (mm)
 
-/* ---- Object detection parameters ---- */
-#define MIN_DETECTION_DIST_MM   100    // minimum distance to consider valid (ignore noise)
-#define MAX_DETECTION_DIST_MM   1000   // maximum distance to consider as "object present"
-#define DETECTION_TIME_MS       3000   // time object must be present before triggering Pi (3 seconds)
-#define LOOP_TIME_MS            140    // approximate time per main loop iteration (ms)
 
-volatile uint32_t object_detect_start_time = 0;  // timestamp when object first detected
-volatile uint8_t  object_detected_flag = 0;      // 1 if object currently in range
-volatile uint8_t  pi_triggered = 0;              // 1 if we already triggered the Pi for this detection
+#define MIN_DETECTION_DIST_MM   100
+#define MAX_DETECTION_DIST_MM   1000
+#define DETECTION_TIME_MS       3000
+#define LOOP_TIME_MS            140
 
-/* ---- Function prototypes ---- */
+volatile uint32_t object_detect_start_time = 0;
+volatile uint8_t  object_detected_flag = 0;
+volatile uint8_t  pi_triggered = 0;
+
+// function prototypes
 void initGPIO(void);
 void initUSART2(void);
 void initUSART3(void);
@@ -66,11 +68,10 @@ volatile SystemState_t current_state = STATE_IDLE;
 
 int main(void)
 {
-	/* Clock setup to 160 MHz using msoe library */
 	msoe_clk_setup(160);
 	msoe_delay_init();
 
-	/* Enable peripheral clocks */
+
 	RCC->AHB3ENR  |= RCC_AHB3ENR_PWREN;    // enable PWR clock
 	PWR->SVMCR    |= (1 << 29);             // set IO2SV bit to allow GPIOG use
 	RCC->AHB2ENR1 |= 0x000000FF;            // enable GPIOA - GPIOH clocks
@@ -90,7 +91,7 @@ int main(void)
 	initUSART3();
 	initUART5();
 
-	/* Main loop - poll sensors and display distances */
+
 	while (1)
 	{
 		LCD_print_str(2, 0, "Waiting...");
@@ -118,7 +119,7 @@ int main(void)
 		LCD_print_udec5(5, 3, distances[2]);
 		LCD_print_str(5, 9, "mm");
 
-		/* Debug: Show PA4 pin state on LCD row 7 so we can verify button works */
+		/* Debug: Show PA4 pin state on LCD row 7 so we can verify done signal works */
 		if (is_pi_done()) {
 			LCD_print_str(7, 0, "PA4=HIGH (btn) ");
 		} else {
@@ -128,7 +129,7 @@ int main(void)
 		/* Process object detection and trigger Raspberry Pi if needed */
 		process_object_detection();
 
-		msoe_delay_ms(100); // poll rate control
+		msoe_delay_ms(100);
 	}
 
 	return 0;
